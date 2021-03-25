@@ -48,11 +48,6 @@ fi
 
 disable1804SystemdResolved
 
-set +x
-ETCD_PEER_CERT=$(echo ${ETCD_PEER_CERTIFICATES} | cut -d'[' -f 2 | cut -d']' -f 1 | cut -d',' -f $((${NODE_INDEX}+1)))
-ETCD_PEER_KEY=$(echo ${ETCD_PEER_PRIVATE_KEYS} | cut -d'[' -f 2 | cut -d']' -f 1 | cut -d',' -f $((${NODE_INDEX}+1)))
-set -x
-
 if [[ $OS == $COREOS_OS_NAME ]]; then
     echo "Changing default kubectl bin location"
     KUBECTL=/opt/kubectl
@@ -176,7 +171,6 @@ configureSwapFile
 ensureSysctl
 ensureKubelet
 ensureJournal
-ensureUpdateNodeLabels
 {{- if NeedsContainerd}} {{- if and IsKubenet (not HasCalicoNetworkPolicy)}}
 ensureNoDupOnPromiscuBridge
 {{- end}} {{- end}}

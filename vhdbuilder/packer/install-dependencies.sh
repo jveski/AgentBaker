@@ -18,13 +18,6 @@ COMPONENTS_FILEPATH=/opt/azure/components.json
 cat components.json > ${COMPONENTS_FILEPATH}
 echo "Starting build on " $(date) > ${VHD_LOGS_FILEPATH}
 
-if [[ ${UBUNTU_RELEASE} == "18.04" && ${ENABLE_FIPS,,} == "true" ]]; then
-  installFIPS 
-elif [[ ${ENABLE_FIPS,,} == "true" ]]; then
-  echo "AKS enables FIPS on Ubuntu 18.04 only, exiting..."
-  exit 1
-fi
-
 if [[ $OS == $MARINER_OS_NAME ]]; then
   chmod 755 /opt
   chmod 755 /opt/azure
@@ -68,6 +61,13 @@ cat << EOF >> ${VHD_LOGS_FILEPATH}
   - zip
 EOF
 
+if [[ ${UBUNTU_RELEASE} == "18.04" && ${ENABLE_FIPS,,} == "true" ]]; then
+  installFIPS
+elif [[ ${ENABLE_FIPS,,} == "true" ]]; then
+  echo "AKS enables FIPS on Ubuntu 18.04 only, exiting..."
+  exit 1
+fi
+
 if [[ ${UBUNTU_RELEASE} == "18.04" ]]; then
   overrideNetworkConfig || exit 1
   disableSystemdTimesyncdAndEnableNTP || exit 1
@@ -75,7 +75,7 @@ fi
 
 if [[ ${CONTAINER_RUNTIME:-""} == "containerd" ]]; then
   echo "VHD will be built with containerd as the container runtime"
-  CONTAINERD_VERSION="1.4.4"
+  CONTAINERD_VERSION="1.5.0-beta.git31a0f92df"
   installStandaloneContainerd
   echo "  - containerd v${CONTAINERD_VERSION}" >> ${VHD_LOGS_FILEPATH}
   CRICTL_VERSIONS="1.19.0"
@@ -194,14 +194,14 @@ if [[ ${installSGX} == "True" ]]; then
         echo "  - ${CONTAINER_IMAGE}" >> ${VHD_LOGS_FILEPATH}
     done
 
-    SGX_PLUGIN_VERSIONS="0.1"
+    SGX_PLUGIN_VERSIONS="0.2"
     for SGX_PLUGIN_VERSION in ${SGX_PLUGIN_VERSIONS}; do
         CONTAINER_IMAGE="mcr.microsoft.com/aks/acc/sgx-plugin:${SGX_PLUGIN_VERSION}"
         pullContainerImage ${cliTool} ${CONTAINER_IMAGE}
         echo "  - ${CONTAINER_IMAGE}" >> ${VHD_LOGS_FILEPATH}
     done
 
-    SGX_WEBHOOK_VERSIONS="0.1"
+    SGX_WEBHOOK_VERSIONS="0.6"
     for SGX_WEBHOOK_VERSION in ${SGX_WEBHOOK_VERSIONS}; do
         CONTAINER_IMAGE="mcr.microsoft.com/aks/acc/sgx-webhook:${SGX_WEBHOOK_VERSION}"
         pullContainerImage ${cliTool} ${CONTAINER_IMAGE}
@@ -233,33 +233,29 @@ done
 # this is used by kube-proxy and need to cover previously supported version for VMAS scale up scenario
 # So keeping as many versions as we can - those unsupported version can be removed when we don't have enough space
 # below are the required to support versions
-# v1.17.13
-# v1.17.16
-# v1.18.10
 # v1.18.14
-# v1.19.6
+# v1.18.17
 # v1.19.7
+# v1.19.9
 # v1.20.2
+# v1.20.5
 # NOTE that we keep multiple files per k8s patch version as kubeproxy version is decided by CCP.
 PATCHED_HYPERKUBE_IMAGES="
-1.17.3-hotfix.20200601.1
-1.17.7-hotfix.20200714.2
-1.17.9-hotfix.20200824.1
-1.17.11-hotfix.20200901
-1.17.11-hotfix.20200901.1
 1.17.13
 1.17.16
-1.18.4-hotfix.20200626.1
-1.18.6-hotfix.20200723.1
 1.18.8-hotfix.20200924
 1.18.10-hotfix.20210118
 1.18.14-hotfix.20210118
-1.19.0
+1.18.14-hotfix.20210322
+1.18.17-hotfix.20210322
 1.19.1-hotfix.20200923
 1.19.3
 1.19.6-hotfix.20210118
-1.19.7-hotfix.20210122
+1.19.7-hotfix.20210310
+1.19.9-hotfix.20210322
 1.20.2
+1.20.2-hotfix.20210310
+1.20.5-hotfix.20210322
 "
 for KUBERNETES_VERSION in ${PATCHED_HYPERKUBE_IMAGES}; do
   # Only need to store k8s components >= 1.19 for containerd VHDs
@@ -283,89 +279,68 @@ for KUBERNETES_VERSION in ${PATCHED_HYPERKUBE_IMAGES}; do
       fi
   fi
 
-  # from 1.17 onwards start using kube-proxy as well
+  # use kube-proxy as well
   # strip the last .1 as that is for base image patch for hyperkube
-  if (($(echo ${KUBERNETES_VERSION} | cut -d"." -f2) >= 17)); then
-      if grep -iq hotfix <<< ${KUBERNETES_VERSION}; then
-      KUBERNETES_VERSION=`echo ${KUBERNETES_VERSION} | cut -d"." -f1,2,3,4`;
-      else
-      KUBERNETES_VERSION=`echo ${KUBERNETES_VERSION} | cut -d"." -f1,2,3`;
-      fi
-      CONTAINER_IMAGE="mcr.microsoft.com/oss/kubernetes/kube-proxy:v${KUBERNETES_VERSION}"
-      pullContainerImage ${cliTool} ${CONTAINER_IMAGE}
-      if [[ ${cliTool} == "docker" ]]; then
-          docker run --rm --entrypoint "" ${CONTAINER_IMAGE} /bin/sh -c "iptables --version" | grep -v nf_tables && echo "kube-proxy contains no nf_tables"
-      else
-          ctr --namespace k8s.io run --rm ${CONTAINER_IMAGE} checkTask /bin/sh -c "iptables --version" | grep -v nf_tables && echo "kube-proxy contains no nf_tables"
-      fi
-      # shellcheck disable=SC2181
-      if [[ $? != 0 ]]; then
-      echo "Hyperkube contains nf_tables, exiting..."
-      exit 99
-      fi
-      echo "  - ${CONTAINER_IMAGE}" >>${VHD_LOGS_FILEPATH}
+  if grep -iq hotfix <<< ${KUBERNETES_VERSION}; then
+    KUBERNETES_VERSION=`echo ${KUBERNETES_VERSION} | cut -d"." -f1,2,3,4`;
+  else
+    KUBERNETES_VERSION=`echo ${KUBERNETES_VERSION} | cut -d"." -f1,2,3`;
   fi
+  CONTAINER_IMAGE="mcr.microsoft.com/oss/kubernetes/kube-proxy:v${KUBERNETES_VERSION}"
+  pullContainerImage ${cliTool} ${CONTAINER_IMAGE}
+  if [[ ${cliTool} == "docker" ]]; then
+      docker run --rm --entrypoint "" ${CONTAINER_IMAGE} /bin/sh -c "iptables --version" | grep -v nf_tables && echo "kube-proxy contains no nf_tables"
+  else
+      ctr --namespace k8s.io run --rm ${CONTAINER_IMAGE} checkTask /bin/sh -c "iptables --version" | grep -v nf_tables && echo "kube-proxy contains no nf_tables"
+  fi
+  # shellcheck disable=SC2181
+  if [[ $? != 0 ]]; then
+  echo "Hyperkube contains nf_tables, exiting..."
+  exit 99
+  fi
+  echo "  - ${CONTAINER_IMAGE}" >>${VHD_LOGS_FILEPATH}
 done
 
 # kubelet and kubectl
 # need to cover previously supported version for VMAS scale up scenario
 # So keeping as many versions as we can - those unsupported version can be removed when we don't have enough space
 # below are the required to support versions
-# v1.17.13
-# v1.17.16
-# v1.18.10
 # v1.18.14
-# v1.19.6
+# v1.18.17
 # v1.19.7
+# v1.19.9
 # v1.20.2
+# v1.20.5
 # NOTE that we only keep the latest one per k8s patch version as kubelet/kubectl is decided by VHD version
 K8S_VERSIONS="
-1.17.3-hotfix.20200601.1
-1.17.7-hotfix.20200817.1
-1.17.9-hotfix.20200824.1
-1.17.11-hotfix.20200901.1
 1.17.13
 1.17.16
-1.18.2-hotfix.20200624.1
-1.18.4-hotfix.20200626.1
-1.18.6-hotfix.20200723.1
 1.18.8-hotfix.20200924
 1.18.10-hotfix.20210118
-1.18.14-hotfix.20210118
-1.19.0
+1.18.14-hotfix.20210322
+1.18.17-hotfix.20210322
 1.19.1-hotfix.20200923
 1.19.3
 1.19.6-hotfix.20210118
-1.19.7-hotfix.20210122
-1.20.2
+1.19.7-hotfix.20210310
+1.19.9-hotfix.20210322
+1.20.2-hotfix.20210310
+1.20.5-hotfix.20210322
 "
 for PATCHED_KUBERNETES_VERSION in ${K8S_VERSIONS}; do
   # Only need to store k8s components >= 1.19 for containerd VHDs
   if (($(echo ${PATCHED_KUBERNETES_VERSION} | cut -d"." -f2) < 19)) && [[ ${CONTAINER_RUNTIME} == "containerd" ]]; then
     continue
   fi
-  if (($(echo ${PATCHED_KUBERNETES_VERSION} | cut -d"." -f2) < 17)); then
-    HYPERKUBE_URL="mcr.microsoft.com/oss/kubernetes/hyperkube:v${PATCHED_KUBERNETES_VERSION}"
-    # NOTE: the KUBERNETES_VERSION will be used to tag the extracted kubelet/kubectl in /usr/local/bin
-    # it should match the KUBERNETES_VERSION format(just version number, e.g. 1.15.7, no prefix v)
-    # in installKubeletAndKubectl() executed by cse, otherwise cse will need to download the kubelet/kubectl again
-    KUBERNETES_VERSION=$(echo ${PATCHED_KUBERNETES_VERSION} | cut -d"_" -f1 | cut -d"-" -f1 | cut -d"." -f1,2,3)
-    # extractHyperkube will extract the kubelet/kubectl binary from the image: ${HYPERKUBE_URL}
-    # and put them to /usr/local/bin/kubelet-${KUBERNETES_VERSION}
-    extractHyperkube ${cliTool}
-    # remove hyperkube here as the one that we really need is pulled later
-    removeContainerImage ${cliTool} $HYPERKUBE_URL
+  # strip the last .1 as that is for base image patch for hyperkube
+  if grep -iq hotfix <<< ${PATCHED_KUBERNETES_VERSION}; then
+    # shellcheck disable=SC2006
+    PATCHED_KUBERNETES_VERSION=`echo ${PATCHED_KUBERNETES_VERSION} | cut -d"." -f1,2,3,4`;
   else
-    # strip the last .1 as that is for base image patch for hyperkube
-    if grep -iq hotfix <<< ${PATCHED_KUBERNETES_VERSION}; then
-      # shellcheck disable=SC2006
-      PATCHED_KUBERNETES_VERSION=`echo ${PATCHED_KUBERNETES_VERSION} | cut -d"." -f1,2,3,4`;
-    else
-      PATCHED_KUBERNETES_VERSION=`echo ${PATCHED_KUBERNETES_VERSION} | cut -d"." -f1,2,3`;
-    fi
-    KUBERNETES_VERSION=$(echo ${PATCHED_KUBERNETES_VERSION} | cut -d"_" -f1 | cut -d"-" -f1 | cut -d"." -f1,2,3)
-    extractKubeBinaries $KUBERNETES_VERSION "https://acs-mirror.azureedge.net/kubernetes/v${PATCHED_KUBERNETES_VERSION}/binaries/kubernetes-node-linux-amd64.tar.gz"
+    PATCHED_KUBERNETES_VERSION=`echo ${PATCHED_KUBERNETES_VERSION} | cut -d"." -f1,2,3`;
   fi
+  KUBERNETES_VERSION=$(echo ${PATCHED_KUBERNETES_VERSION} | cut -d"_" -f1 | cut -d"-" -f1 | cut -d"." -f1,2,3)
+  extractKubeBinaries $KUBERNETES_VERSION "https://acs-mirror.azureedge.net/kubernetes/v${PATCHED_KUBERNETES_VERSION}/binaries/kubernetes-node-linux-amd64.tar.gz"
 done
 
 # shellcheck disable=SC2129
@@ -397,3 +372,7 @@ tee -a ${VHD_LOGS_FILEPATH} < /proc/version
 } >> ${VHD_LOGS_FILEPATH}
 
 installAscBaseline
+
+if [[ ${UBUNTU_RELEASE} == "18.04" && ${ENABLE_FIPS,,} == "true" ]]; then
+  relinkResolvConf
+fi

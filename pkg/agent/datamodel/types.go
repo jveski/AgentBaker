@@ -11,13 +11,11 @@ import (
 	"math/rand"
 	neturl "net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/Azure/agentbaker/pkg/aks-engine/helpers"
 	"github.com/Azure/go-autorest/autorest/to"
-	"github.com/blang/semver"
 )
 
 // TypeMeta describes an individual API model object
@@ -133,7 +131,7 @@ const (
 	AKSUbuntuContainerd1804Gen2        Distro = "aks-ubuntu-containerd-18.04-gen2"
 	AKSUbuntuGPUContainerd1804         Distro = "aks-ubuntu-gpu-containerd-18.04"
 	AKSUbuntuGPUContainerd1804Gen2     Distro = "aks-ubuntu-gpu-containerd-18.04-gen2"
-	AKSMarinerV1                       Distro = "aks-mariner-v1"
+	AKSCBLMarinerV1                    Distro = "aks-cblmariner-v1"
 	AKSUbuntuFipsContainerd1804        Distro = "aks-ubuntu-fips-containerd-18.04"
 	AKSUbuntuFipsContainerd1804Gen2    Distro = "aks-ubuntu-fips-containerd-18.04-gen2"
 	AKSUbuntuFipsGPUContainerd1804     Distro = "aks-ubuntu-fips-gpu-containerd-18.04"
@@ -150,7 +148,7 @@ var AKSDistrosAvailableOnVHD []Distro = []Distro{
 	AKSUbuntuContainerd1804Gen2,
 	AKSUbuntuGPUContainerd1804,
 	AKSUbuntuGPUContainerd1804Gen2,
-	AKSMarinerV1,
+	AKSCBLMarinerV1,
 	AKSUbuntuFipsContainerd1804,
 	AKSUbuntuFipsContainerd1804Gen2,
 	AKSUbuntuFipsGPUContainerd1804,
@@ -301,12 +299,8 @@ type AADProfile struct {
 type CertificateProfile struct {
 	// CaCertificate is the certificate authority certificate.
 	CaCertificate string `json:"caCertificate,omitempty" conform:"redact"`
-	// CaPrivateKey is the certificate authority key.
-	CaPrivateKey string `json:"caPrivateKey,omitempty" conform:"redact"`
 	// ApiServerCertificate is the rest api server certificate, and signed by the CA
 	APIServerCertificate string `json:"apiServerCertificate,omitempty" conform:"redact"`
-	// ApiServerPrivateKey is the rest api server private key, and signed by the CA
-	APIServerPrivateKey string `json:"apiServerPrivateKey,omitempty" conform:"redact"`
 	// ClientCertificate is the certificate used by the client kubelet services and signed by the CA
 	ClientCertificate string `json:"clientCertificate,omitempty" conform:"redact"`
 	// ClientPrivateKey is the private key used by the client kubelet services and signed by the CA
@@ -315,18 +309,6 @@ type CertificateProfile struct {
 	KubeConfigCertificate string `json:"kubeConfigCertificate,omitempty" conform:"redact"`
 	// KubeConfigPrivateKey is the client private key used for kubectl cli and signed by the CA
 	KubeConfigPrivateKey string `json:"kubeConfigPrivateKey,omitempty" conform:"redact"`
-	// EtcdServerCertificate is the server certificate for etcd, and signed by the CA
-	EtcdServerCertificate string `json:"etcdServerCertificate,omitempty" conform:"redact"`
-	// EtcdServerPrivateKey is the server private key for etcd, and signed by the CA
-	EtcdServerPrivateKey string `json:"etcdServerPrivateKey,omitempty" conform:"redact"`
-	// EtcdClientCertificate is etcd client certificate, and signed by the CA
-	EtcdClientCertificate string `json:"etcdClientCertificate,omitempty" conform:"redact"`
-	// EtcdClientPrivateKey is the etcd client private key, and signed by the CA
-	EtcdClientPrivateKey string `json:"etcdClientPrivateKey,omitempty" conform:"redact"`
-	// EtcdPeerCertificates is list of etcd peer certificates, and signed by the CA
-	EtcdPeerCertificates []string `json:"etcdPeerCertificates,omitempty" conform:"redact"`
-	// EtcdPeerPrivateKeys is list of etcd peer private keys, and signed by the CA
-	EtcdPeerPrivateKeys []string `json:"etcdPeerPrivateKeys,omitempty" conform:"redact"`
 }
 
 // ServicePrincipalProfile contains the client and secret used by the cluster for Azure Resource CRUD
@@ -517,9 +499,6 @@ type KubernetesConfig struct {
 	PrivateCluster                    *PrivateCluster   `json:"privateCluster,omitempty"`
 	GCHighThreshold                   int               `json:"gchighthreshold,omitempty"`
 	GCLowThreshold                    int               `json:"gclowthreshold,omitempty"`
-	EtcdVersion                       string            `json:"etcdVersion,omitempty"`
-	EtcdDiskSizeGB                    string            `json:"etcdDiskSizeGB,omitempty"`
-	EtcdEncryptionKey                 string            `json:"etcdEncryptionKey,omitempty"`
 	EnableDataEncryptionAtRest        *bool             `json:"enableDataEncryptionAtRest,omitempty"`
 	EnableEncryptionWithExternalKms   *bool             `json:"enableEncryptionWithExternalKms,omitempty"`
 	EnablePodSecurityPolicy           *bool             `json:"enablePodSecurityPolicy,omitempty"`
@@ -1041,10 +1020,6 @@ func (p *Properties) GetKubeProxyFeatureGatesWindowsArguments() string {
 	return strings.TrimSuffix(buf.String(), ", ")
 }
 
-func (a *AgentPoolProfile) IsMariner() bool {
-	return strings.EqualFold(string(a.Distro), string(AKSMarinerV1))
-}
-
 // IsVHDDistro returns true if the distro uses VHD SKUs
 func (a *AgentPoolProfile) IsVHDDistro() bool {
 	return a.Distro.IsVHDDistro()
@@ -1132,16 +1107,6 @@ func (l *LinuxProfile) HasSearchDomain() bool {
 		}
 	}
 	return false
-}
-
-// GetAPIServerEtcdAPIVersion Used to set apiserver's etcdapi version
-func (o *OrchestratorProfile) GetAPIServerEtcdAPIVersion() string {
-	if o.KubernetesConfig != nil {
-		// if we are here, version has already been validated..
-		etcdVersion, _ := semver.Make(o.KubernetesConfig.EtcdVersion)
-		return "etcd" + strconv.FormatUint(etcdVersion.Major, 10)
-	}
-	return ""
 }
 
 // IsAzureCNI returns true if Azure CNI network plugin is enabled
@@ -1443,6 +1408,7 @@ type NodeBootstrappingConfiguration struct {
 	SubscriptionID                string
 	ResourceGroupName             string
 	UserAssignedIdentityClientID  string
+	OSSKU                         string
 	ConfigGPUDriverIfNeeded       bool
 	Disable1804SystemdResolved    bool
 	EnableGPUDevicePluginIfNeeded bool
