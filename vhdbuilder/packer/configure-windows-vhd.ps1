@@ -6,10 +6,7 @@
         This script is used by packer to produce Windows AKS images.
 #>
 
-param (
-    $containerRuntime,
-    $windowsSKU
-)
+param()
 
 $ErrorActionPreference = "Stop"
 
@@ -20,19 +17,6 @@ $global:containerdPackageUrl = "https://mobyartifacts.azureedge.net/moby/moby-co
 function Write-Log($Message) {
     $msg = $message | Timestamp
     Write-Output $msg
-}
-
-function DownloadFileWithRetry {
-    param (
-        $URL,
-        $Dest,
-        $retryCount = 5,
-        $retryDelay = 0
-    )
-    curl.exe -f --retry $retryCount --retry-delay $retryDelay -L $URL -o $Dest
-    if (-not $?) {
-        throw "Curl exited with '$LASTEXITCODE' while attemping to download '$URL'"
-    }
 }
 
 function Disable-WindowsUpdates {
@@ -55,44 +39,31 @@ function Disable-WindowsUpdates {
 function Get-ContainerImages {
     param (
         $containerRuntime,
-        $windowsSKU
+        $windowsServerVersion
     )
 
-    $imagesToPull = @()
-
-    switch ($windowsSKU) {
-        { '2019', '2019-containerd'} {
+    switch ($windowsServerVersion) {
+        '2019' {
             $imagesToPull = @(
                 "mcr.microsoft.com/windows/servercore:ltsc2019",
                 "mcr.microsoft.com/windows/nanoserver:1809",
                 "mcr.microsoft.com/oss/kubernetes/pause:1.4.1",
+                "mcr.microsoft.com/oss/kubernetes/pause:3.4.1",
                 "mcr.microsoft.com/oss/kubernetes-csi/livenessprobe:v2.0.1-alpha.1-windows-1809-amd64",
-                "mcr.microsoft.com/oss/kubernetes-csi/livenessprobe:v2.2.0",
-                "mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar:v1.2.1-alpha.1-windows-1809-amd64",
-                "mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar:v2.0.1",
-                "mcr.microsoft.com/oss/kubernetes/azure-cloud-node-manager:v0.5.1",
-                "mcr.microsoft.com/oss/kubernetes/azure-cloud-node-manager:v0.6.0",
-                "mcr.microsoft.com/oss/kubernetes/azure-cloud-node-manager:v0.7.0",
-                "mcr.microsoft.com/oss/kubernetes-csi/secrets-store/driver:v0.0.19",
-                "mcr.microsoft.com/oss/azure/secrets-store/provider-azure:0.0.12",
-                "mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.0.0",
-                "mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.1.0",
-                "mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.1.1",
-                "mcr.microsoft.com/oss/kubernetes-csi/azurefile-csi:v1.0.0")
-            Write-Log "Pulling images for windows server 2019"
+                "mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar:v1.2.1-alpha.1-windows-1809-amd64")
         }
         '2004' {
             $imagesToPull = @(
                 "mcr.microsoft.com/windows/servercore:2004",
                 "mcr.microsoft.com/windows/nanoserver:2004",
-                "mcr.microsoft.com/oss/kubernetes/pause:1.4.1")
-            Write-Log "Pulling images for windows server core 2004"
+                "mcr.microsoft.com/oss/kubernetes/pause:1.4.1",
+                "mcr.microsoft.com/oss/kubernetes/pause:3.4.1")
         }
         default {
-            Write-Log "No valid windows SKU is specified $windowsSKU"
-            exit 1
+            $imagesToPull = @()
         }
     }
+
 
     if ($containerRuntime -eq 'containerd') {
         # start containerd to pre-pull the images to disk on VHD
@@ -112,16 +83,11 @@ function Get-ContainerImages {
 }
 
 function Get-FilesToCacheOnVHD {
-
-    param (
-        $containerRuntime
-    )
-
-    Write-Log "Caching misc files on VHD, container runtimne: $containerRuntime"
+    Write-Log "Caching misc files on VHD"
 
     $map = @{
         "c:\akse-cache\"              = @(
-            "https://github.com/Azure/AgentBaker/raw/master/vhdbuilder/scripts/windows/collect-windows-logs.ps1",
+            "https://github.com/Azure/aks-engine/raw/master/scripts/collect-windows-logs.ps1",
             "https://github.com/Microsoft/SDN/raw/master/Kubernetes/flannel/l2bridge/cni/win-bridge.exe",
             "https://github.com/microsoft/SDN/raw/master/Kubernetes/windows/debug/collectlogs.ps1",
             "https://github.com/microsoft/SDN/raw/master/Kubernetes/windows/debug/dumpVfpPolicies.ps1",
@@ -133,48 +99,33 @@ function Get-FilesToCacheOnVHD {
             "https://github.com/microsoft/SDN/raw/master/Kubernetes/windows/helper.psm1",
             "https://github.com/Microsoft/SDN/raw/master/Kubernetes/windows/hns.psm1",
             "https://globalcdn.nuget.org/packages/microsoft.applicationinsights.2.11.0.nupkg",
-            "https://acs-mirror.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.8.zip",
-            "https://acs-mirror.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.10.zip",
-            "https://acs-mirror.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.12.zip"
+            "https://kubernetesartifacts.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.3.zip",
+            "https://kubernetesartifacts.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.4.zip",
+            "https://kubernetesartifacts.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.8.zip",
+            "https://kubernetesartifacts.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.9.zip",
+            "https://kubernetesartifacts.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.10.zip",
+            "https://kubernetesartifacts.azureedge.net/aks-engine/windows/provisioning/signedscripts-v0.0.11.zip"
         );
         "c:\akse-cache\containerd\"   = @(
             $global:containerdPackageUrl
         );
         "c:\akse-cache\csi-proxy\"    = @(
-            "https://acs-mirror.azureedge.net/csi-proxy/v0.2.2/binaries/csi-proxy-v0.2.2.tar.gz"
+            "https://kubernetesartifacts.azureedge.net/csi-proxy/v0.2.2/binaries/csi-proxy-v0.2.2.tar.gz"
         );
-        # When to remove depracted Kubernetes Windows packages:
-        # There are 30 days grace period before a depracted Kubernetes version is out of supported
-        # xref: https://docs.microsoft.com/en-us/azure/aks/supported-kubernetes-versions
         "c:\akse-cache\win-k8s\"      = @(
-            "https://acs-mirror.azureedge.net/kubernetes/v1.17.7-hotfix.20200817/windowszip/v1.17.7-hotfix.20200817-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.17.9-hotfix.20200824/windowszip/v1.17.9-hotfix.20200824-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.17.11-hotfix.20200901/windowszip/v1.17.11-hotfix.20200901-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.17.13-hotfix.20210118/windowszip/v1.17.13-hotfix.20210118-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.17.16-hotfix.20210118/windowszip/v1.17.16-hotfix.20210118-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.18.4-hotfix.20200626/windowszip/v1.18.4-hotfix.20200626-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.18.6-hotfix.20200723/windowszip/v1.18.6-hotfix.20200723-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.18.8-hotfix.20200924/windowszip/v1.18.8-hotfix.20200924-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.18.10-hotfix.20210118/windowszip/v1.18.10-hotfix.20210118-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.18.14-hotfix.20210322/windowszip/v1.18.14-hotfix.20210322-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.18.17-hotfix.20210322/windowszip/v1.18.17-hotfix.20210322-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.19.0/windowszip/v1.19.0-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.19.1-hotfix.20200923/windowszip/v1.19.1-hotfix.20200923-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.19.3-hotfix.20210118/windowszip/v1.19.3-hotfix.20210118-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.19.6-hotfix.20210118/windowszip/v1.19.6-hotfix.20210118-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.19.7-hotfix.20210310/windowszip/v1.19.7-hotfix.20210310-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.19.9-hotfix.20210322/windowszip/v1.19.9-hotfix.20210322-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.20.2-hotfix.20210310/windowszip/v1.20.2-hotfix.20210310-1int.zip",
-            "https://acs-mirror.azureedge.net/kubernetes/v1.20.5-hotfix.20210322/windowszip/v1.20.5-hotfix.20210322-1int.zip"
+            "https://kubernetesartifacts.azureedge.net/kubernetes/v1.17.17-azs/windowszip/v1.17.17-azs-1int.zip",
+            "https://kubernetesartifacts.azureedge.net/kubernetes/v1.18.15-azs/windowszip/v1.18.15-azs-1int.zip",
+            "https://kubernetesartifacts.azureedge.net/kubernetes/v1.17.17/windowszip/v1.17.17-1int.zip",
+            "https://kubernetesartifacts.azureedge.net/kubernetes/v1.18.17/windowszip/v1.18.17-1int.zip",
+            "https://kubernetesartifacts.azureedge.net/kubernetes/v1.19.9/windowszip/v1.19.9-1int.zip",
+            "https://kubernetesartifacts.azureedge.net/kubernetes/v1.20.5/windowszip/v1.20.5-1int.zip",
+            "https://kubernetesartifacts.azureedge.net/kubernetes/v1.21.0-beta.1/windowszip/v1.21.0-beta.1-1int.zip"
         );
         "c:\akse-cache\win-vnet-cni\" = @(
-            "https://acs-mirror.azureedge.net/azure-cni/v1.2.2/binaries/azure-vnet-cni-singletenancy-windows-amd64-v1.2.2.zip",
-            "https://acs-mirror.azureedge.net/azure-cni/v1.2.6/binaries/azure-vnet-cni-singletenancy-windows-amd64-v1.2.6.zip",
-            "https://acs-mirror.azureedge.net/azure-cni/v1.2.7/binaries/azure-vnet-cni-singletenancy-windows-amd64-v1.2.7.zip"
-        );
-        "c:\akse-cache\calico\" = @(
-            "https://acs-mirror.azureedge.net/calico-node/v3.17.2/binaries/calico-windows-v3.17.2.zip",
-            "https://acs-mirror.azureedge.net/calico-node/v3.18.1/binaries/calico-windows-v3.18.1.zip"
+            "https://kubernetesartifacts.azureedge.net/azure-cni/v1.2.2/binaries/azure-vnet-cni-singletenancy-windows-amd64-v1.2.2.zip",
+            "https://kubernetesartifacts.azureedge.net/azure-cni/v1.2.7/binaries/azure-vnet-cni-singletenancy-windows-amd64-v1.2.7.zip"
+
+
         )
     }
 
@@ -183,21 +134,13 @@ function Get-FilesToCacheOnVHD {
 
         foreach ($URL in $map[$dir]) {
             $fileName = [IO.Path]::GetFileName($URL)
-
-            # Windows containerD supports Windows containerD, starting from Kubernetes 1.20
-            if ($containerRuntime -eq 'containerd' -And $dir -eq "c:\akse-cache\win-k8s\") {
-                $k8sMajorVersion = $fileName.split(".",3)[0]
-                $k8sMinorVersion = $fileName.split(".",3)[1]
-                if ($k8sMinorVersion -lt "20" -And $k8sMajorVersion -eq "v1") {
-                    Write-Log "Skip to download $url for containerD is supported from Kubernets 1.20"
-                    continue
-                }
-            }
-
             $dest = [IO.Path]::Combine($dir, $fileName)
 
             Write-Log "Downloading $URL to $dest"
-            DownloadFileWithRetry -URL $URL -Dest $dest
+            curl.exe -f --retry 5 --retry-delay 0 -L $URL -o $dest
+            if ($LASTEXITCODE) {
+                throw "Curl exited with '$LASTEXITCODE' while attemping to downlaod '$URL'"
+            }
         }
     }
 }
@@ -206,13 +149,20 @@ function Install-ContainerD {
     Write-Log "Getting containerD binaries from $global:containerdPackageUrl"
 
     $installDir = "c:\program files\containerd"
-    $zipPath = [IO.Path]::Combine($installDir, "containerd.zip")
-
     Write-Log "Installing containerd to $installDir"
     New-Item -ItemType Directory $installDir -Force | Out-Null
-    DownloadFileWithRetry -URL $global:containerdPackageUrl -Dest $zipPath
-    Expand-Archive -Path $zipPath -DestinationPath $installDir
-    Remove-Item -Path $zipPath | Out-null
+
+    if ($global:containerdPackageUrl.endswith(".zip")) {
+        $zipPath = [IO.Path]::Combine($installDir, "containerd.zip")
+        Invoke-WebRequest -UseBasicParsing -Uri $global:containerdPackageUrl -OutFile $zipPath
+        Expand-Archive -path $zipPath -DestinationPath $installDir -Force
+        Remove-Item -Path $zipPath | Out-Null
+    } else {
+        $tarPath = [IO.Path]::Combine($installDir, "containerd.tar.gz")
+        Invoke-WebRequest -UseBasicParsing -Uri $global:containerdPackageUrl -OutFile $tarPath
+        tar -xzf $tarPath --strip=1 -C $installDir
+        Remove-Item -Path $tarPath | Out-Null
+    }
 
     $newPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine) + ";$installDir"
     [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::Machine)
@@ -223,13 +173,12 @@ function Install-Docker {
     $defaultDockerVersion = "19.03.14"
 
     Write-Log "Attempting to install Docker version $defaultDockerVersion"
-    Install-PackageProvider -Name DockerMsftProvider -Force -ForceBootstrap | Out-null
+    Install-PackageProvider -Name DockerMsftProvider -Force -ForceBootstrap | Out-Null
     $package = Find-Package -Name Docker -ProviderName DockerMsftProvider -RequiredVersion $defaultDockerVersion
     Write-Log "Installing Docker version $($package.Version)"
     $package | Install-Package -Force | Out-Null
     Start-Service docker
 }
-
 
 function Install-OpenSSH {
     Write-Log "Installing OpenSSH Server"
@@ -237,10 +186,29 @@ function Install-OpenSSH {
 }
 
 function Install-WindowsPatches {
-    # Windows Server 2019 update history can be found at https://support.microsoft.com/en-us/help/4464619
-    # then you can get download links by searching for specific KBs at http://www.catalog.update.microsoft.com/home.aspx
+    param (
+        $windowsServerVersion
+    )
 
-    $patchUrls = @()
+    switch ($windowsServerVersion) {
+        '2019' {
+            # Windows Server 2019 update history can be found at https://support.microsoft.com/en-us/help/4464619
+            # then you can get download links by searching for specific KBs at http://www.catalog.update.microsoft.com/home.aspx
+
+            # KB4598230 contains March 9, 2021 cumulative updates for Windows Server 2019
+            # https://www.catalog.update.microsoft.com/Search.aspx?q=KB5000822
+            $patchUrls = @("http://download.windowsupdate.com/c/msdownload/update/software/secu/2021/03/windows10.0-kb5000822-x64_567b66c719842beeaaf49e6332aa6f3477c225a7.msu")
+        }
+        '2004' {
+            # Windows Server, Version 2004 update history can be found at https://support.microsoft.com/en-us/help/4555932
+            # then you can get download links by searching for specific KBs at http://www.catalog.update.microsoft.com/home.aspx
+
+            $patchUrls = @()
+        }
+        default {
+            $patchUrls = @()
+        }
+    }
 
     foreach ($patchUrl in $patchUrls) {
         $pathOnly = $patchUrl.Split("?")[0]
@@ -251,16 +219,16 @@ function Install-WindowsPatches {
         switch ($fileExtension) {
             ".msu" {
                 Write-Log "Downloading windows patch from $pathOnly to $fullPath"
-                DownloadFileWithRetry -URL $patchUrl -Dest $fullPath
+                Invoke-WebRequest -UseBasicParsing $patchUrl -OutFile $fullPath
                 Write-Log "Starting install of $fileName"
-                $proc = Start-Process -Passthru -FilePath wusa.exe -ArgumentList "$fullPath /quiet /norestart"
+                $proc = Start-Process -PassThru -FilePath wusa.exe -ArgumentList "$fullPath /quiet /norestart"
                 Wait-Process -InputObject $proc
                 switch ($proc.ExitCode) {
                     0 {
                         Write-Log "Finished install of $fileName"
                     }
                     3010 {
-                        WRite-Log "Finished install of $fileName. Reboot required"
+                        Write-Log "Finished install of $fileName. Reboot required"
                     }
                     default {
                         Write-Log "Error during install of $fileName. ExitCode: $($proc.ExitCode)"
@@ -321,8 +289,10 @@ function Update-WindowsFeatures {
 }
 
 function Update-Registry {
-    Write-Host "Enable a HNS fix in 2021-2C"
-    reg add HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\hns\State /v HNSControlFlag /t REG_DWORD /d 1
+    # if multple LB policies are included for same endpoint then HNS hangs.
+    # this fix forces an error
+    Write-Host "Enable a HNS fix in 2021-2C+"
+    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\hns\State" -Name HNSControlFlag -Value 1 -Type DWORD
 }
 
 # Disable progress writers for this session to greatly speed up operations such as Invoke-WebRequest
@@ -335,10 +305,10 @@ if (-not ($validContainerRuntimes -contains $containerRuntime)) {
     exit 1
 }
 
-$windowsSKU = $env:WindowsSKU
-$validSKU = @('2019', '2019-containerd', '2004')
-if (-not ($validSKU -contains $windowsSKU)) {
-    Write-Host "Unsupported windows image SKU: $windowsSKU"
+$windowsServerVersion = $env:WindowsServerVersion
+$validWindowsServerContainers = @('2019', '2004')
+if (-not ($validWindowsServerContainers -contains $windowsServerVersion)) {
+    Write-Host "Unsupported Windows Server version: $windowsServerVersion"
     exit 1
 }
 
@@ -348,7 +318,7 @@ switch ($env:ProvisioningPhase) {
         Set-WinRmServiceDelayedStart
         Set-AllowedSecurityProtocols
         Disable-WindowsUpdates
-        Install-WindowsPatches
+        Install-WindowsPatches -WindowsServerVersion $windowsServerVersion
         Update-DefenderSignatures
         Install-OpenSSH
         Update-WindowsFeatures
@@ -362,8 +332,8 @@ switch ($env:ProvisioningPhase) {
             Install-Docker
         }
         Update-Registry
-        Get-ContainerImages -containerRuntime $containerRuntime -windowsSKU $windowsSKU
-        Get-FilesToCacheOnVHD -containerRuntime $containerRuntime
+        Get-ContainerImages -containerRuntime $containerRuntime -WindowsServerVersion $windowsServerVersion
+        Get-FilesToCacheOnVHD
         (New-Guid).Guid | Out-File -FilePath 'c:\vhd-id.txt'
     }
     default {
