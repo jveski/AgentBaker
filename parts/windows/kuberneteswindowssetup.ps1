@@ -14,22 +14,6 @@
 #>
 [CmdletBinding(DefaultParameterSetName="Standard")]
 param(
-    [string]
-    [ValidateNotNullOrEmpty()]
-    $MasterIP,
-
-    [parameter()]
-    [ValidateNotNullOrEmpty()]
-    $KubeDnsServiceIp,
-
-    [parameter(Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    $MasterFQDNPrefix,
-
-    [parameter(Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    $Location,
-
     [parameter(Mandatory=$true)]
     [ValidateNotNullOrEmpty()]
     $AgentKey,
@@ -40,19 +24,19 @@ param(
 
     [parameter(Mandatory=$true)]
     [ValidateNotNullOrEmpty()]
-    $AADClientSecret, # base64
-
-    [parameter(Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    $NetworkAPIVersion,
-
-    [parameter(Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    $TargetEnvironment,
-
-    [string]
-    $UserAssignedClientID
+    $AADClientSecret # base64
 )
+
+$MasterIP = "{{ GetKubernetesEndpoint }}"
+$KubeDnsServiceIp = "{{GetParameter "kubeDNSServiceIP"}}"
+$MasterFQDNPrefix = "{{GetParameter "masterEndpointDNSNamePrefix"}}"
+$Location = "{{GetVariable "location"}}"
+$NetworkAPIVersion = "2018-08-01"
+$TargetEnvironment = "{{ GetTargetEnvironment }}"
+$UserAssignedClientID = ""
+{{if UserAssignedIDEnabled}}
+$UserAssignedClientID =  "{{GetVariable "userAssignedIdentityID"}}"
+{{ end }}
 
 # These globals will not change between nodes in the same cluster, so they are not
 # passed as powershell parameters
@@ -194,6 +178,7 @@ Expand-Archive scripts.zip -DestinationPath "C:\\AzureData\\"
 . c:\AzureData\windows\windowscontainerdfunc.ps1
 . c:\AzureData\windows\windowshostsconfigagentfunc.ps1
 . c:\AzureData\windows\windowscalicofunc.ps1
+. c:\AzureData\windows\windowscsehelper.ps1
 
 $useContainerD = ($global:ContainerRuntime -eq "containerd")
 $global:KubeClusterConfigPath = "c:\k\kubeclusterconfig.json"
@@ -515,6 +500,7 @@ try
             Remove-Item $kubeConfigFile
         }
 
+        # Postpone restart-computer so we can generate CSE response before restart computer
         Write-Log "Setup Complete, reboot computer"
         Restart-Computer
     }
@@ -535,6 +521,9 @@ catch
 
     # Add timestamp in the logs
     Write-Log $_
-    throw $_
+
+    # Set-ExitCode will exit with the specified ExitCode immediately and not be caught by this catch block
+    # Ideally all exceptions will be handled by Set-ExitCode.
+    exit $global:WINDOWS_UNEXPECTED_CSE_EXIT_CODE
 }
 
